@@ -1,0 +1,47 @@
+---
+title: "Paired Bulk & Single Cell RNA-seq of Breast Cancer Cells"
+subtitle: "PHC 6088 Project"
+author: "Jack Leary"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: paper
+    highlight: tango
+    code_folding: show
+    code_download: true
+    toc: true
+    toc_float: true
+---
+
+# Introduction
+
+
+
+# Data Description
+
+The data are publicly available through the [Gene Expression Omnibus](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE141834). 
+
+```{zsh}
+cd ~/Desktop/UF\ Biostatistics/PHC\ 6088/PHC-6088-Project/data/Hoffman_single_cell
+gunzip matrix.mtx.gz
+```
+
+```{r}
+counts <- Read10X("../data/Hoffman_single_cell/", gene.column = 1)
+bc <- CreateSeuratObject(counts = counts, project = "Hoffman_2020")
+```
+
+```{zsh}
+cd ~/Desktop/UF\ Biostatistics/PHC\ 6088/PHC-6088-Project/data/Hoffman_single_cell
+gzip matrix.mtx
+```
+
+# Analysis Plan 
+
+## Bulk RNA-seq
+
+## Single Cell RNA-seq
+
+# References
+
+1. Hoffman *et al*, 2020. [Single-cell RNA sequencing reveals a heterogeneous response to Glucocorticoids in breast cancer cells](https://doi.org/10.1038/s42003-020-0837-0). *Communications Biology*.
