@@ -1,0 +1,68 @@
+---
+title: "Analysis"
+subtitle: "PHC 6088"
+author: "Jack Leary"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: paper
+    highlight: tango
+    code_folding: show
+    code_download: true
+    toc: true
+    toc_float: true
+    df_print: kable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Libraries
+
+```{r libraries}
+library(Seurat)      # scRNA-seq analysis
+library(kableExtra)  # table styling
+```
+
+# Introduction
+
+# Data 
+
+## Bulk 
+
+```{r}
+bulk_bc <- read.table("../data/Hoffman_bulk.txt")
+```
+
+## Single Cell
+
+```{zsh}
+cd ~/Desktop/UF\ Biostatistics/PHC\ 6088/PHC-6088-Project/data/Hoffman_single_cell
+gunzip matrix.mtx.gz
+```
+
+```{r}
+counts <- Read10X("../data/Hoffman_single_cell/", gene.column = 1)
+sc_bc <- CreateSeuratObject(counts = counts, project = "Hoffman_2020")
+```
+
+```{zsh}
+cd ~/Desktop/UF\ Biostatistics/PHC\ 6088/PHC-6088-Project/data/Hoffman_single_cell
+gzip matrix.mtx
+```
+
+# Processing 
+
+## Nulk 
+
+## Single Cell
+
+### Normalization
+
+First we calculate the percentage of mitochondrial DNA in each cell using a regular expression to identify mitochondrial genes. 
+
+```{r}
+sc_bc[["prop_mito"]] <- PercentageFeatureSet(sc_bc, pattern = "^MT-")
+```
+

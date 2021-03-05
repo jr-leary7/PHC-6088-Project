@@ -1,6 +1,6 @@
 ---
 title: "Paired Bulk & Single Cell RNA-seq of Breast Cancer Cells"
-subtitle: "PHC 6088 Project"
+subtitle: "Project Proposal - PHC 6088"
 author: "Jack Leary"
 date: "`r Sys.Date()`"
 output:
@@ -11,7 +11,22 @@ output:
     code_download: true
     toc: true
     toc_float: true
+    df_print: kable
 ---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      message = FALSE, 
+                      warning = FALSE, 
+                      fig.align = "center")
+```
+
+# Libraries
+
+```{r libraries}
+library(Seurat)      # scRNA-seq analysis
+library(kableExtra)  # table styling
+```
 
 # Introduction
 
@@ -21,6 +36,12 @@ output:
 
 The data are publicly available through the [Gene Expression Omnibus](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE141834). 
 
+## Proof of Download
+
+### Single Cell RNA-seq
+
+I converted the raw counts matrix, originally stored in a simple `.txt` file, into the format preferred by `Seurat` for importation: a `.mtx` file containing a sparse counts matrix, and two `.tsv` files containing the genes and UMI barcodes. In order to push this data to [the GitHub repository I've set up for this project](https://github.com/jr-leary7/PHC-6088-Project), I needed to compress the counts matrix file. GitHub unfortunately won't allow you to store files larger than 100Mb. On the other hand, `Seurat` won't read in a matrix file with the `.gz` extension, so when I read in the counts I first use Zsh chinks (thank you, RMarkdown) to run `gunzip` to decompress the file. After importing it, I run `gzip` on it again to ensure that it plays nice with GitHub. 
+
 ```{zsh}
 cd ~/Desktop/UF\ Biostatistics/PHC\ 6088/PHC-6088-Project/data/Hoffman_single_cell
 gunzip matrix.mtx.gz
@@ -28,7 +49,7 @@ gunzip matrix.mtx.gz
 
 ```{r}
 counts <- Read10X("../data/Hoffman_single_cell/", gene.column = 1)
-bc <- CreateSeuratObject(counts = counts, project = "Hoffman_2020")
+sc_bc <- CreateSeuratObject(counts = counts, project = "Hoffman_2020")
 ```
 
 ```{zsh}
@@ -36,7 +57,35 @@ cd ~/Desktop/UF\ Biostatistics/PHC\ 6088/PHC-6088-Project/data/Hoffman_single_ce
 gzip matrix.mtx
 ```
 
+```{r}
+sc_bc@assays$RNA[1:5, 1:3] %>% 
+  kbl() %>% 
+  kable_minimal("hover", html_font = "Fira Code")
+```
+
+### Bulk RNA-seq
+
+There were no such formatting or storage size issues with the bulk RNA-seq data, which we'll import now. 
+
+```{r}
+bulk_bc <- read.table("../data/Hoffman_bulk.txt")
+bulk_bc[1:5, 1:3] %>% 
+  kbl() %>% 
+  kable_minimal("hover", html_font = "Fira Code")
+```
+
 # Analysis Plan 
+
+1. Process data 
+  - Bulk RNA
+    - Scale (maybe?)
+    - log2(x+1)
+  - Single Cell RNA  
+    - Calculate % mito, cell cycle scores
+    - Regress out effects & normalize 
+    - Cluster & dimension reduce (PHATE especially!) 
+2. Differential Expression Analysis 
+3. Pathway Analysis 
 
 ## Bulk RNA-seq
 
