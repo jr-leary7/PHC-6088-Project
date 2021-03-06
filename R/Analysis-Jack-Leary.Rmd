@@ -54,7 +54,7 @@ gzip matrix.mtx
 
 # Processing 
 
-## Nulk 
+## Bulk 
 
 ## Single Cell
 

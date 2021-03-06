@@ -30,7 +30,9 @@ library(kableExtra)  # table styling
 
 # Introduction
 
+This project centers around characterizing the transcriptional response of breast cancer cells to Dexamethasone, a glucocorticoid used as a cancer therapy<sup>1,2,3</sup>. The cells were taken from a human breast cancer cell line<sup>2</sup>, ensuring minimal genetic variation due to innate cellular characteristics. Some cells were also treated with an ethanol vehicle in order to provide a control. At time points 0, 1, 2, 4, 8, and 18 hours, both bulk and single cell RNA-seq were performed on subsamples of the treated and untreated cells. Using both methodologies allows for the comparison of the results of analytical methods such as differential gene expression<sup>1</sup>.
 
+Broadly, the authors wished to characterize the GR at a cellular resolution, and confirm the scRNA-seq results by comparing them to those from bulk RNA-seq and ChIP-seq datasets<sup>1,4</sup>. More specifically, the main purpose of the study is to identify novel targets of the glucocorticoid response (GR), define the transcriptional changes in the cells across time, and determine how the Dex-regulated genes behave together. 
 
 # Data Description
 
@@ -40,7 +42,7 @@ The data are publicly available through the [Gene Expression Omnibus](https://ww
 
 ### Single Cell RNA-seq
 
-I converted the raw counts matrix, originally stored in a simple `.txt` file, into the format preferred by `Seurat` for importation: a `.mtx` file containing a sparse counts matrix, and two `.tsv` files containing the genes and UMI barcodes. In order to push this data to [the GitHub repository I've set up for this project](https://github.com/jr-leary7/PHC-6088-Project), I needed to compress the counts matrix file. GitHub unfortunately won't allow you to store files larger than 100Mb. On the other hand, `Seurat` won't read in a matrix file with the `.gz` extension, so when I read in the counts I first use Zsh chinks (thank you, RMarkdown) to run `gunzip` to decompress the file. After importing it, I run `gzip` on it again to ensure that it plays nice with GitHub. 
+I converted the raw counts matrix, originally stored in a `.txt` file, into the format preferred by `Seurat`<sup>5</sup> for importation: a `.mtx` file containing a sparse counts matrix, and two `.tsv` files containing the genes and UMI barcodes. In order to push this data to [the GitHub repository I've set up for this project](https://github.com/jr-leary7/PHC-6088-Project) I needed to compress the counts matrix file, as GitHub unfortunately won't allow you to store files larger than 100Mb. On the other hand, `Seurat` won't read in a matrix file with the `.gz` extension, so when I read in the counts I first use Zsh chunks (thank you, RMarkdown) to run `gunzip` to decompress the file. After importing it, I run `gzip` on it again to ensure that it plays nice with GitHub. 
 
 ```{zsh}
 cd ~/Desktop/UF\ Biostatistics/PHC\ 6088/PHC-6088-Project/data/Hoffman_single_cell
@@ -76,21 +78,41 @@ bulk_bc[1:5, 1:3] %>%
 
 # Analysis Plan 
 
-1. Process data 
-  - Bulk RNA
-    - Scale (maybe?)
-    - log2(x+1)
-  - Single Cell RNA  
-    - Calculate % mito, cell cycle scores
-    - Regress out effects & normalize 
-    - Cluster & dimension reduce (PHATE especially!) 
-2. Differential Expression Analysis 
-3. Pathway Analysis 
+- Process Data 
+    - Bulk RNA
+      - No processing necessary as normalized counts were provided by the authors
+    - Single Cell RNA  
+      - Calculate % mitochondrial DNA, cell cycle scores, & regress out: removes unwanted genetic / technical variation
+      -  Normalize counts: library size differs across cells, so it's necessary to normalize
+      - Identify highly variable genes: used to lower dimensionality of the PCA embedding
+      - Dimension reduce & cluster cells: PCs are used to identify clusters, and t-SNE / UMAP / etc. are used to visualize cells in 2D
 
-## Bulk RNA-seq
+- Differential Expression Analysis 
+    - Define differentially expressed genes at each timepoint
+      - Bulk RNA-seq: use [`limma-voom`](https://ucdavis-bioinformatics-training.github.io/2018-June-RNA-Seq-Workshop/thursday/DE.html) as well as [`DESeq2`](https://bioconductor.org/packages/release/bioc/html/DESeq2.html) and compare results
+      - scRNA-seq: use Wilcox test, which is the `Seurat` default - and the authors only mention that `Seurat` was used to perform scRNA-seq differential expression
+    - Compare DEG lists between bulk and single cell, and to bulk and single cell DEG lists as identified by the authors 
 
-## Single Cell RNA-seq
+- Pathway Analysis 
+    - Use the [`fgsea` R package](http://www.bioconductor.org/packages/release/bioc/html/fgsea.html) (for bulk RNA-seq) and the [`VAM` package](https://cran.r-project.org/web//packages/VAM/VAM.pdf) (for single cell) to perform pathway analysis at each time point of pathways such as [the GR regulatory network](https://www.gsea-msigdb.org/gsea/msigdb/cards/PID_REG_GR_PATHWAY)
+
+-  Visualize Results
+    - Dimension reduced plots to visualize scRNA-seq cells
+    - Heatmaps of DEGs
+    - Pathway enrichment plots
+
+- Compare Results to Original Manuscript
+    - Was I able to reproduce the original analysis? 
+    - Was I able to produce any novel findings?
 
 # References
 
-1. Hoffman *et al*, 2020. [Single-cell RNA sequencing reveals a heterogeneous response to Glucocorticoids in breast cancer cells](https://doi.org/10.1038/s42003-020-0837-0). *Communications Biology*.
+1. Hoffman *et al* (2020). [Single-cell RNA sequencing reveals a heterogeneous response to Glucocorticoids in breast cancer cells](https://doi.org/10.1038/s42003-020-0837-0). *Communications Biology*.
+
+2. Archer *et al* (1994). [The differential capacity of glucocorticoids and progestins to alter chromatin structure and induce gene expression in human breast cancer cells](https://doi.org/10.1210/mend.8.9.7838148). *Molecular Endocrinology*. 
+
+3. Rhen & Cidlowski (2005). [Antiinflammatory action of glucocortoids - New mechanisms for old drugs.](https://doi.org/10.1056/nejmra050541). *New England Journal of Medicine*. 
+
+4. Hoffman *et al* (2018). [BRG1 governs glucocorticoid receptor interactions with chromatin and pioneer factors across the genome](https://doi.org/10.7554/eLife.35073). *eLife*. 
+
+5. Stuart *et al* (2019). [Comprehensive integration of single cell data](https://doi.org/10.1016/j.cell.2019.05.031). *Cell*. 
