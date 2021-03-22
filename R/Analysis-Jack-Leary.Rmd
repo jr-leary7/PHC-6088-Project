@@ -15,12 +15,16 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, 
+                      message = FALSE, 
+                      warning = FALSE, 
+                      fig.align = "center")
 ```
 
 # Libraries
 
 ```{r libraries}
+library(dplyr)       # tidy data
 library(Seurat)      # scRNA-seq analysis
 library(kableExtra)  # table styling
 ```
@@ -60,9 +64,15 @@ gzip matrix.mtx
 
 ### Normalization
 
-First we calculate the percentage of mitochondrial DNA in each cell using a regular expression to identify mitochondrial genes. 
+First we calculate the percentage of mitochondrial DNA in each cell using a regular expression to identify mitochondrial genes, and add an identifier for which timepoint each cell was taken from. 
 
 ```{r}
 sc_bc[["prop_mito"]] <- PercentageFeatureSet(sc_bc, pattern = "^MT-")
+sc_bc[["timepoint"]] <- case_when()
+```
+
+```{r}
+m <- function(x) strsplit(x, "_")[[1]][1]
+unique(sapply(colnames(sc_bc), m))
 ```
 
