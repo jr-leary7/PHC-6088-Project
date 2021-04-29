@@ -330,18 +330,31 @@ p12
 
 ## Bulk 
 
-### Differential Expression
-
-We first need to create a dataframe of sample information. 
+### Dimension Reduction
 
 ```{r}
-sample_dat <- colnames(bulk_bc_counts)
 timepoints <- case_when(grepl("OH", colnames(bulk_bc_counts)) ~ "0h", 
                         grepl("1hr", colnames(bulk_bc_counts)) ~ "1h", 
                         grepl("2hr", colnames(bulk_bc_counts)) ~ "2h", 
                         grepl("4hr", colnames(bulk_bc_counts)) ~ "4h", 
                         grepl("D8hr", colnames(bulk_bc_counts)) ~ "8h", 
                         grepl("18hr", colnames(bulk_bc_counts)) ~ "18h")
+bulk_pca <- prcomp(t(bulk_bc))
+ggplot(data = NULL, aes(x = bulk_pca$x[, 1], y = bulk_pca$x[, 2], 
+                        color = factor(timepoints, levels = c("0h", "1h", "2h", "4h", "8h", "18h")))) + 
+  geom_point(size = 4) + 
+  labs(x = "PC 1", y = "PC 2", color = "Time", title = "Bulk RNA-seq Samples") + 
+  scale_color_paletteer_d("ggthemes::Classic_10") + 
+  theme_jack() + 
+  guides(color = guide_legend(nrow = 1, override.aes = list(size = 4)))
+```
+
+### Differential Expression
+
+We first need to create a dataframe of sample information. 
+
+```{r}
+sample_dat <- colnames(bulk_bc_counts)
 batches <- case_when(grepl("rep1", colnames(bulk_bc_counts)) ~ "Rep1", 
                      grepl("rep2", colnames(bulk_bc_counts)) ~ "Rep2", 
                      grepl("rep3", colnames(bulk_bc_counts)) ~ "Rep3")
