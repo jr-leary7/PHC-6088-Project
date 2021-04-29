@@ -1,16 +1,18 @@
 ---
-title: "Analysis"
+title: "Analysis of Breast Cancer Response to Glucocorticoid Therapy Over Time"
 subtitle: "PHC 6088"
 author: "Jack Leary"
 date: "`r Sys.Date()`"
 output:
   html_document:
-    theme: paper
+    theme: yeti
     highlight: tango
     code_folding: show
     code_download: true
     toc: true
-    toc_float: true
+    toc_float:
+      collpased: false
+      smooth_scroll: true
     df_print: kable
 ---
 
@@ -19,17 +21,27 @@ knitr::opts_chunk$set(echo = TRUE,
                       message = FALSE, 
                       warning = FALSE, 
                       fig.align = "center")
+set.seed(312)
+reticulate::use_virtualenv("~/Desktop/Python/science/")
 ```
 
 # Libraries
 
 ```{r libraries}
 library(dplyr)       # tidy data
+library(scales)      # plot utilities
+library(Trendy)      # segmented regression
+library(ggpubr)      # plot helpers
 library(Seurat)      # scRNA-seq analysis
+library(ggplot2)     # sweet plots
+library(biomaRt)     # query genomic data
+library(SCISSORS)    # recluster cells / scRNA-seq tools
+library(magrittr)    # assignment pipe
+library(jackknife)   # my package
+library(paletteer)   # color palettes
+library(reticulate)  # Python
 library(kableExtra)  # table styling
 ```
-
-# Introduction
 
 # Data 
 
@@ -37,6 +49,16 @@ library(kableExtra)  # table styling
 
 ```{r}
 bulk_bc <- read.table("../data/Hoffman_bulk.txt")
+
+```
+
+Since gene expression matrices are odd, I'll need to filter out a bunch of non-genes from this dataset. We'll also need to convert the expression data from $log_2$-normalized data back to counts using exponentiation and rounding. 
+
+```{r}
+ensembl <- useEnsembl(biomart = "genes", dataset = "hsapiens_gene_ensembl")
+hgnc_genes <- getBM(attributes = "hgnc_symbol", mart = ensembl)
+bulk_bc <- bulk_bc[toupper(rownames(bulk_bc)) %in% hgnc_genes$hgnc_symbol, ]
+bulk_bc_counts <- round(2^bulk_bc) - 1
 ```
 
 ## Single Cell
@@ -58,21 +80,351 @@ gzip matrix.mtx
 
 # Processing 
 
-## Bulk 
-
 ## Single Cell
 
 ### Normalization
 
-First we calculate the percentage of mitochondrial DNA in each cell using a regular expression to identify mitochondrial genes, and add an identifier for which timepoint each cell was taken from. 
+First we calculate the percentage of mitochondrial DNA in each cell using a regular expression to identify mitochondrial genes, and add an identifier for which timepoint each cell was taken from. Lastly, we compute cell cycle scores for each cell. We use negative binomial regression to control for the effects of the proportion of mitochondrial DNA within and the cell cycle state of each cell. 
 
 ```{r}
 sc_bc[["prop_mito"]] <- PercentageFeatureSet(sc_bc, pattern = "^MT-")
-sc_bc[["timepoint"]] <- case_when()
+sc_bc[["timepoint"]] <- case_when(grepl("00", rownames(sc_bc@meta.data)) ~ "0h", 
+                                  grepl("01", rownames(sc_bc@meta.data)) ~ "1h", 
+                                  grepl("02", rownames(sc_bc@meta.data)) ~ "2h", 
+                                  grepl("04", rownames(sc_bc@meta.data)) ~ "4h", 
+                                  grepl("08", rownames(sc_bc@meta.data)) ~ "8h", 
+                                  grepl("18", rownames(sc_bc@meta.data)) ~ "18h")
+sc_bc[["timepoint"]] <- factor(sc_bc$timepoint, ordered = TRUE, 
+                               levels = c("0h", "1h", "2h", "4h", "8h", "18h"))
+Idents(sc_bc) <- "timepoint"
+sc_bc <- NormalizeData(sc_bc, verbose = FALSE)
+sc_bc <- CellCycleScoring(sc_bc, 
+                          s.features = cc.genes.updated.2019$s.genes, 
+                          g2m.features = cc.genes.updated.2019$g2m.genes, 
+                          set.ident = FALSE)
+sc_bc$CC.Difference <- sc_bc$S.Score - sc_bc$G2M.Score
+sc_bc <- SCTransform(sc_bc, 
+                     variable.features.n = 4000, 
+                     vars.to.regress = c("nCount_RNA", "prop_mito", "CC.Difference"),  
+                     seed.use = 629, 
+                     verbose = FALSE)
+p1 <- VlnPlot(sc_bc, features = "prop_mito") + 
+      labs(x = "Time", y = "% Mitochondrial\nGenes", title = NULL) + 
+      theme_jack() + 
+      scale_fill_paletteer_d("ggthemes::Classic_10") + 
+      scale_y_continuous(labels = percent_format(scale = 1, accuracy = 1)) + 
+      guides(fill = guide_legend(nrow = 1, override.aes = list(size = 0)))
+p1
+t.test(sc_bc$prop_mito[sc_bc$timepoint == "8h"], sc_bc$prop_mito[sc_bc$timepoint == "18h"])
+```
+
+### Dimension Reduction
+
+We'll start by running Principal Component Analysis (PCA). 
+
+```{r}
+sc_bc <- RunPCA(sc_bc, 
+                features = VariableFeatures(sc_bc), 
+                npcs = 20, 
+                verbose = FALSE, 
+                seed.use = 629)
+```
+
+The timepoints don't separate well in PCA space, 
+
+```{r}
+p2 <- DimPlot(sc_bc, reduction = "pca") + 
+      scale_color_paletteer_d("ggthemes::Classic_10") + 
+      labs(x = "PC 1", y = "PC 2", title = NULL) + 
+      theme_jack(axis.nums = FALSE) + 
+      legend_jack(key.size = 4)
+p2a <- DimPlot(sc_bc, reduction = "pca") + 
+       scale_color_paletteer_d("ggthemes::Classic_10") + 
+       labs(x = NULL, y = NULL, subtitle = "PCA") + 
+       theme_jack(axis.nums = FALSE) + 
+       legend_jack(key.size = 4) + 
+       theme(plot.subtitle = element_text(hjust = 0.5, face = "italic"))
+p3 <- DimPlot(sc_bc, reduction = "pca", dims = 2:3) + 
+      scale_color_paletteer_d("ggthemes::Classic_10") + 
+      labs(x = "PC 2", y = "PC 3", title = NULL) + 
+      theme_jack(axis.nums = FALSE) + 
+      legend_jack(key.size = 4)
+p4 <- DimPlot(sc_bc, reduction = "pca", dims = 3:4) + 
+      scale_color_paletteer_d("ggthemes::Classic_10") + 
+      labs(x = "PC 3", y = "PC 4", title = NULL) + 
+      theme_jack(axis.nums = FALSE) + 
+      legend_jack(key.size = 4)
+p5 <- DimPlot(sc_bc, reduction = "pca", dims = 4:5) + 
+      scale_color_paletteer_d("ggthemes::Classic_10") + 
+      labs(x = "PC 4", y = "PC 5", title = NULL) + 
+      theme_jack(axis.nums = FALSE) + 
+      legend_jack(key.size = 4)
+p6 <- ggarrange(p2, p3, p4, p5, nrow = 2, ncol = 2, common.legend = TRUE, legend = "bottom") %>% 
+      annotate_figure(top = text_grob("Principal Component Analysis", size = 14, face = "bold"))
+p6
+```
+
+We'll run t-SNE next. 
+
+```{r}
+sc_bc <- RunTSNE(sc_bc, 
+                 reduction = "pca", 
+                 dims = 1:20, 
+                 dim.embed = 2, 
+                 seed.use = 629)
+p7 <- DimPlot(sc_bc, reduction = "tsne") + 
+      scale_color_paletteer_d("ggthemes::Classic_10") + 
+      labs(x = NULL, y = NULL, subtitle = "t-SNE") + 
+      theme_jack(axis.nums = FALSE) + 
+      legend_jack(key.size = 4) + 
+      theme(plot.subtitle = element_text(hjust = 0.5, face = "italic"))
+```
+
+And then UMAP. 
+
+```{r}
+sc_bc <- RunUMAP(sc_bc, 
+                 reduction = "pca", 
+                 dims = 1:20, 
+                 n.components = 2, 
+                 seed.use = 629, 
+                 verbose = FALSE)
+p8 <- DimPlot(sc_bc, reduction = "umap") + 
+      scale_color_paletteer_d("ggthemes::Classic_10") + 
+      labs(x = NULL, y = NULL, subtitle = "UMAP") + 
+      theme_jack(axis.nums = FALSE) + 
+      legend_jack(key.size = 4) + 
+      theme(plot.subtitle = element_text(hjust = 0.5, face = "italic"))
+```
+
+And lastly PHATE, which is implemented in Python. 
+
+```{python}
+import phate
+import numpy as np
+```
+
+```{python}
+pc = r.pc_df
+phate_op = phate.PHATE(n_components=2, n_pca=None, mds_solver='smacof', verbose=False, random_state=629)
+phate_fit = phate_op.fit_transform(pc)
 ```
 
 ```{r}
-m <- function(x) strsplit(x, "_")[[1]][1]
-unique(sapply(colnames(sc_bc), m))
+phate_df <- py$phate_fit
+colnames(phate_df) <- c("PHATE_1", "PHATE_2")
+rownames(phate_df) <- colnames(sc_bc)
+phate_obj <- CreateDimReducObject(embeddings =  phate_df, 
+                                  assay = "SCT", 
+                                  key = "phate_", 
+                                  global = TRUE)
+sc_bc@reductions$phate <- phate_obj
+p9 <- DimPlot(sc_bc, reduction = "phate") + 
+      scale_color_paletteer_d("ggthemes::Classic_10") + 
+      labs(x = NULL, y = NULL, subtitle = "PHATE") + 
+      theme_jack(axis.nums = FALSE) + 
+      legend_jack(key.size = 4) + 
+      theme(plot.subtitle = element_text(hjust = 0.5, face = "italic"))
 ```
 
+Some cells appear to segregate by timepoint, while many others do not. 
+
+```{r}
+p10 <- ggarrange(p2a, p7, p8, p9, ncol = 2, nrow = 2, common.legend = TRUE, legend = "bottom") %>% 
+       annotate_figure(top = text_grob("Dimension Reduction", size = 14, face = "bold"))
+p10
+```
+
+### Clustering
+
+```{r}
+sc_bc <- FindNeighbors(sc_bc, 
+                       reduction = "pca", 
+                       dims = 1:20, 
+                       verbose = FALSE)
+sc_bc <- FindClusters(sc_bc, 
+                      resolution = 0.25, 
+                      algorithm = 2, 
+                      verbose = FALSE, 
+                      random.seed = 629)
+p11 <- DimPlot(sc_bc) + 
+       scale_color_paletteer_d("miscpalettes::pastel") + 
+       labs(x = "UMAP 1", y = "UMAP 2", title = "Louvain Clusters") + 
+       theme_jack(axis.nums = FALSE) + 
+       legend_jack(key.size = 4) + 
+       theme(plot.title.position = "panel", plot.title = element_text(face = "bold"))
+p11
+```
+
+### Differential Expression 
+
+Next we'll run differential expression analysis to find universal cluster markers. 
+
+```{r}
+clust_de <- FindAllMarkers(sc_bc, 
+                           logfc.threshold = 0.25, 
+                           test.use = "wilcox", 
+                           verbose = FALSE, 
+                           only.pos = TRUE, 
+                           random.seed = 629)
+clust_de %>% 
+  filter(p_val_adj < 0.01) %>% 
+  arrange(cluster, desc(avg_log2FC)) %>% 
+  dplyr::select(cluster, gene, avg_log2FC, p_val_adj, pct.1, pct.2) %>% 
+  group_by(cluster) %>% 
+  slice_head(n = 5) %>% 
+  kbl(booktabs = TRUE) %>% 
+  kable_minimal("hover")
+```
+
+Now we'll do the same test for the timepoints instead of the Louvain clusters. 
+
+```{r}
+Idents(sc_bc) <- "timepoint"
+time_de <- FindAllMarkers(sc_bc, 
+                          logfc.threshold = 0.25, 
+                          test.use = "wilcox", 
+                          verbose = FALSE, 
+                          only.pos = TRUE, 
+                          random.seed = 629)
+time_de %>% 
+  filter(p_val_adj < 0.01) %>% 
+  arrange(cluster, desc(avg_log2FC)) %>% 
+  dplyr::select(cluster, gene, avg_log2FC, p_val_adj, pct.1, pct.2) %>% 
+  dplyr::rename(timepoint = cluster) %>% 
+  group_by(timepoint) %>% 
+  slice_head(n = 5) %>% 
+  kbl(booktabs = TRUE) %>% 
+  kable_minimal("hover")
+```
+
+Lastly, we'll compute a table of DE genes that will match the output from `DESeq2`, i.e. we'll test each of the treated timepoints against the ethanol vehicle. 
+
+```{r}
+de_df <- NULL
+times_to_compare <- as.character(unique(sample_dat$condition)[-1])
+for (i in seq_along(times_to_compare)) {
+  markers_raw <- FindMarkers(sc_bc, 
+                             ident.1 = times_to_compare[i], 
+                             ident.2 = "0h", 
+                             test.use = "wilcox", 
+                             logfc.threshold = 0.25, 
+                             verbose = FALSE, 
+                             random.seed = 629)
+  markers_raw %<>% 
+    mutate(cluster = times_to_compare[i], gene = rownames(markers_raw)) %>% 
+    filter(p_val_adj < 0.01 & cluster == times_to_compare[i]) %>% 
+    dplyr::select(cluster, gene, avg_log2FC, p_val_adj, pct.1, pct.2)
+  de_df %<>% bind_rows(markers_raw)
+}
+
+de_df %>% 
+  arrange(cluster, desc(avg_log2FC)) %>% 
+  group_by(cluster) %>% 
+  slice_head(n = 10) -> top_10_de
+p12 <- DoHeatmap(sc_bc, features = unique(top_10_de$gene), 
+                 group.colors = paletteer_d("ggthemes::Classic_10"), angle = 30, hjust = 0) + 
+       scale_fill_gradientn(colors = paletteer_d("wesanderson::Zissou1")) 
+p12
+```
+
+## Bulk 
+
+### Differential Expression
+
+We first need to create a dataframe of sample information. 
+
+```{r}
+sample_dat <- colnames(bulk_bc_counts)
+timepoints <- case_when(grepl("OH", colnames(bulk_bc_counts)) ~ "0h", 
+                        grepl("1hr", colnames(bulk_bc_counts)) ~ "1h", 
+                        grepl("2hr", colnames(bulk_bc_counts)) ~ "2h", 
+                        grepl("4hr", colnames(bulk_bc_counts)) ~ "4h", 
+                        grepl("D8hr", colnames(bulk_bc_counts)) ~ "8h", 
+                        grepl("18hr", colnames(bulk_bc_counts)) ~ "18h")
+batches <- case_when(grepl("rep1", colnames(bulk_bc_counts)) ~ "Rep1", 
+                     grepl("rep2", colnames(bulk_bc_counts)) ~ "Rep2", 
+                     grepl("rep3", colnames(bulk_bc_counts)) ~ "Rep3")
+sample_dat <- data.frame(batch = factor(batches), 
+                         condition = factor(timepoints, 
+                                            levels = c("0h", "1h", "2h", "4h", "8h", "18h")))
+rownames(sample_dat) <- colnames(bulk_bc_counts)
+```
+
+Next we'll run `DESeq2`. 
+
+```{r}
+des2_data <- DESeqDataSetFromMatrix(countData = bulk_bc_counts, 
+                                    colData = sample_dat, 
+                                    design = ~ batch + condition)
+des2 <- DESeq(des2_data)
+des2_res <- DESeq2::results(des2, alpha = 0.01, lfcThreshold = 0.25)
+summary(des2_res)
+des2_res
+```
+
+Let's get the results into a table format. 
+
+```{r}
+bulk_de_df <- NULL
+res_names <- resultsNames(des2)[4:8]
+time_names <- unique(timepoints)[-1]
+for (i in seq_along(res_names)) {
+  res_temp <- DESeq2::results(des2, name = res_names[i], lfcThreshold = 0.25, alpha = 0.01)
+  res_df <- data.frame(res_temp)
+  res_df %<>% 
+    mutate(cluster = time_names[i], 
+           gene = rownames(res_df)) %>% 
+    na.omit() %>% 
+    dplyr::select(cluster, gene, baseMean, log2FoldChange, padj) %>% 
+    filter(abs(log2FoldChange) > 0.25 & padj < 0.01)
+  bulk_de_df %<>% bind_rows(res_df)
+}
+```
+
+And finally create a heatmap. 
+
+```{r}
+bulk_de_df %>% 
+  arrange(cluster, desc(log2FoldChange)) %>% 
+  group_by(cluster) %>% 
+  slice_head(n = 10) -> top_10_de_bulk
+anno_df <- data.frame(timepoint = timepoints)
+anno_cols <- list(timepoint = c("0h" = paletteer_d("ggthemes::Classic_10")[1], 
+                                "1h" = paletteer_d("ggthemes::Classic_10")[2], 
+                                "2h" = paletteer_d("ggthemes::Classic_10")[3], 
+                                "4h" = paletteer_d("ggthemes::Classic_10")[4], 
+                                "8h" = paletteer_d("ggthemes::Classic_10")[5], 
+                                "18h" = paletteer_d("ggthemes::Classic_10")[6]))
+rownames(anno_df) <- colnames(bulk_bc)
+heat_counts <- log2(bulk_bc_counts[top_10_de_bulk$gene, ] + 1)
+p13 <- pheatmap(heat_counts, 
+                fontsize_row = 5, 
+                cluster_cols = FALSE, 
+                cluster_rows = FALSE, 
+                show_colnames = FALSE, 
+                annotation_col = anno_df, 
+                annotation_names_col = FALSE, 
+                annotation_colors = anno_cols, 
+                color = paletteer_d("wesanderson::Zissou1"))
+```
+
+### Trendy
+
+```{r}
+time_vec <- c(rep(0, 3), rep(1, 3), rep(2, 3), rep(4, 3), rep(8, 3), rep(18, 3))
+trendy_res <- trendy(Data = bulk_bc, 
+                     tVectIn = time_vec, 
+                     maxK = 1, 
+                     numTry = 3, 
+                     minNumInSeg = 3)
+top_trendy_res <- topTrendy(results(trendy_res), adjR2Cut = .9)
+trendy_res_heatmap <- trendHeatmap(top_trendy_res)
+```
+
+```{r}
+plotFeature(Data = bulk_bc, 
+            tVectIn = time_vec, spacing.x = 2, 
+            featureNames = names(trendy_res_heatmap$firstup)[30:40], 
+            simple = FALSE)
+```
